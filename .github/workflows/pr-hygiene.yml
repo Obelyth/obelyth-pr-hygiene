@@ -1,0 +1,398 @@
+name: PR Hygiene
+
+# Reusable workflow. Repos call it from a thin caller file; see README.md.
+#
+# Deterministic shell first, a model last. On every pull request event the
+# jobs below make sure the label scheme exists and put type/* (from the title)
+# and size/* (from the diff) on the pull request, set the quarter milestone,
+# link the issue the branch names, request the configured reviewers, keep the
+# project board in step, and - only when the body is empty or still carries
+# the template's placeholder comments - have a model write the empty sections
+# from the diff, behind a guard that rejects any change to what a person wrote.
+# On a v* tag push, a release with generated notes.
+#
+# Nothing here removes a label a person added, reopens a closed milestone,
+# replaces a body, or creates a release on a pull request event.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "On a tag push, the tag to release (callers pass github.ref_name). Empty on pull request events."
+        type: string
+        default: ""
+      config_path:
+        description: "Where the calling repository keeps its settings. Read from the default branch."
+        type: string
+        default: ".github/pr-hygiene.yml"
+      toolkit_repo:
+        description: "Repository supplying the scripts and the label scheme. Change it on a fork."
+        type: string
+        default: "Obelyth/obelyth-pr-hygiene"
+      toolkit_ref:
+        description: "Commit of the toolkit whose scripts run. Empty means the commit this workflow file came from."
+        type: string
+        default: ""
+
+env:
+  TOOLKIT_REF: ${{ inputs.toolkit_ref || github.job_workflow_sha || 'main' }}
+
+jobs:
+  # Reads the settings and decides whether this event is one to act on.
+  setup:
+    name: settings
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.gate.outputs.proceed }}
+      milestone: ${{ steps.config.outputs.milestone }}
+      reviewers: ${{ steps.config.outputs.reviewers }}
+      copilot_review: ${{ steps.config.outputs.copilot_review }}
+      project_owner: ${{ steps.config.outputs.project_owner }}
+      project_number: ${{ steps.config.outputs.project_number }}
+      project_status_field: ${{ steps.config.outputs.project_status_field }}
+      project_status_opened: ${{ steps.config.outputs.project_status_opened }}
+      project_status_merged: ${{ steps.config.outputs.project_status_merged }}
+      project_status_closed: ${{ steps.config.outputs.project_status_closed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.toolkit_repo }}
+          ref: ${{ env.TOOLKIT_REF }}
+          path: .pr-hygiene-toolkit
+          persist-credentials: false
+
+      - name: Is this a pull request we can write to?
+        id: gate
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          ACTION: ${{ github.event.action }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [[ "$HEAD_REPO" != "$REPO" ]]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::PR #$NUMBER comes from a fork ($HEAD_REPO); the token cannot edit it, so nothing runs."
+            echo "- Pull request from a fork: nothing to do." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+          echo "## PR Hygiene: #$NUMBER ($ACTION)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Read .github/pr-hygiene.yml from the default branch
+        id: config
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          CONFIG_PATH: ${{ inputs.config_path }}
+        run: |
+          cfg="$RUNNER_TEMP/pr-hygiene.yml"
+          if gh api "repos/$REPO/contents/$CONFIG_PATH" --jq '.content' 2> /dev/null | base64 -d > "$cfg" && [[ -s "$cfg" ]]; then
+            echo "settings from $CONFIG_PATH on the default branch"
+          else
+            rm -f "$cfg"
+            echo "no $CONFIG_PATH on the default branch; defaults apply"
+          fi
+          bash .pr-hygiene-toolkit/scripts/config.sh "$cfg" | tee -a "$GITHUB_OUTPUT"
+
+  labels:
+    needs: setup
+    if: needs.setup.outputs.proceed == 'true' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.toolkit_repo }}
+          ref: ${{ env.TOOLKIT_REF }}
+          path: .pr-hygiene-toolkit
+          persist-credentials: false
+
+      - name: The label scheme exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: bash .pr-hygiene-toolkit/scripts/labels-ensure.sh .pr-hygiene-toolkit/labels/labels.json
+
+      - name: type/* from the title, size/* from the diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash .pr-hygiene-toolkit/scripts/labels-apply.sh
+
+      - name: Does this repository have a labeler config?
+        id: labeler
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if gh api "repos/$REPO/contents/.github/labeler.yml" --jq '.sha' > /dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "no .github/labeler.yml; path labels skipped"
+          fi
+
+      - name: Path labels
+        if: steps.labeler.outputs.present == 'true'
+        uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
+        with:
+          sync-labels: false
+
+  milestone:
+    needs: setup
+    if: needs.setup.outputs.proceed == 'true' && github.event.action != 'closed' && needs.setup.outputs.milestone != 'none'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.toolkit_repo }}
+          ref: ${{ env.TOOLKIT_REF }}
+          path: .pr-hygiene-toolkit
+          persist-credentials: false
+
+      - name: The quarter's milestone, or the configured one
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          POLICY: ${{ needs.setup.outputs.milestone }}
+          CREATED_AT: ${{ github.event.pull_request.created_at }}
+        run: bash .pr-hygiene-toolkit/scripts/milestone.sh
+
+  development:
+    needs: setup
+    if: needs.setup.outputs.proceed == 'true' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.toolkit_repo }}
+          ref: ${{ env.TOOLKIT_REF }}
+          path: .pr-hygiene-toolkit
+          persist-credentials: false
+
+      - name: Link the issue the branch names
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: bash .pr-hygiene-toolkit/scripts/link-issue.sh
+
+  reviewers:
+    needs: setup
+    if: >-
+      needs.setup.outputs.proceed == 'true'
+      && contains(fromJSON('["opened", "reopened", "ready_for_review"]'), github.event.action)
+      && (needs.setup.outputs.reviewers != '' || needs.setup.outputs.copilot_review == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.toolkit_repo }}
+          ref: ${{ env.TOOLKIT_REF }}
+          path: .pr-hygiene-toolkit
+          persist-credentials: false
+
+      - name: Request the configured reviewers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          REVIEWERS: ${{ needs.setup.outputs.reviewers }}
+          COPILOT: ${{ needs.setup.outputs.copilot_review }}
+        run: bash .pr-hygiene-toolkit/scripts/reviewers.sh
+
+  # Runs after development so the two never edit the body at the same time.
+  describe:
+    needs: [setup, development]
+    if: >-
+      !cancelled()
+      && needs.setup.outputs.proceed == 'true'
+      && github.event.action != 'closed'
+      && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      # The calling repository, so the describer can read source for context.
+      # Nothing is ever committed or pushed from here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.toolkit_repo }}
+          ref: ${{ env.TOOLKIT_REF }}
+          path: .pr-hygiene-toolkit
+          persist-credentials: false
+
+      - name: Is there anything to write, and anything to write it with?
+        id: prep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          OUT_DIR: .pr-hygiene
+          HAS_CLAUDE_CREDENTIAL: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && 'true' || 'false' }}
+        run: |
+          # Neither scratch directory is the caller's code; keep git from seeing them.
+          printf '.pr-hygiene/\n.pr-hygiene-toolkit/\n' >> .git/info/exclude
+          bash .pr-hygiene-toolkit/scripts/describe-prepare.sh
+          needed="$(sed -n 's/^needed=//p' "$GITHUB_OUTPUT" | tail -n1)"
+          if [[ "$needed" == "true" && "$HAS_CLAUDE_CREDENTIAL" != "true" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::describe: the body needs writing but neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set for this repository, so it was left as it is."
+            echo "- describe: skipped - no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$needed" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write the empty sections from the diff
+        id: claude
+        if: steps.prep.outputs.run == 'true'
+        uses: anthropics/claude-code-action@3b8197d3d486006dd4af54613517f21ac6ac625e # v1.0.227
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: |
+            You are filling in the description of pull request #${{ github.event.pull_request.number }}
+            on ${{ github.repository }}. Nothing else.
+
+            Prepared for you under .pr-hygiene/ in the working directory:
+              current.md   the pull request body exactly as it is now
+              title.txt    the title
+              files.txt    the changed files
+              diff.patch   the diff (if it says it was truncated, `gh pr diff ${{ github.event.pull_request.number }}` has the rest)
+            The repository is checked out here too, so you can read any file for context.
+
+            The body follows a template whose empty sections are marked by HTML
+            comments of the form <!-- pr-hygiene: <section> ... -->. Replace each
+            such comment with two to five plain sentences - or a short list for
+            the test plan - written from the diff:
+              summary    what the change does, concretely
+              why        the problem or request it answers, as far as the diff and
+                         title show it; if you cannot tell, say so in one sentence
+                         rather than inventing a motive
+              test-plan  what the diff itself proves (tests added or changed, CI
+                         changes) and what has not been verified; never claim a
+                         test was run or a result was seen
+            Facts only, no praise, no headings of your own.
+
+            Every byte outside those comments stays identical: headings, the
+            checklist, blank lines, anything a person already wrote. If current.md
+            is empty, write a body with the headings "## Summary", "## Why" and
+            "## Test plan".
+
+            Write the complete new body to .pr-hygiene/body.md. That file is the
+            only output. A guard compares it to current.md and discards it if
+            anything outside the placeholder comments changed; if it passes, it
+            becomes the pull request body. Do not edit the pull request yourself,
+            do not comment on it, and do not touch any other file.
+          claude_args: |
+            --model claude-sonnet-5
+            --max-turns 12
+            --allowedTools 'Read,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Write(.pr-hygiene/body.md),Write(/.pr-hygiene/body.md)'
+            --disallowedTools 'Edit,MultiEdit,NotebookEdit,WebFetch,WebSearch,Bash(gh pr edit:*),Bash(gh api:*),Bash(git push:*)'
+
+      - name: Put it on the pull request if nothing a person wrote changed
+        if: steps.prep.outputs.run == 'true' && !cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          OUT_DIR: .pr-hygiene
+        run: bash .pr-hygiene-toolkit/scripts/describe-apply.sh
+
+  projects:
+    needs: setup
+    if: needs.setup.outputs.proceed == 'true' && needs.setup.outputs.project_number != '0'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.toolkit_repo }}
+          ref: ${{ env.TOOLKIT_REF }}
+          path: .pr-hygiene-toolkit
+          persist-credentials: false
+
+      - name: Is there a token that can write projects?
+        id: gate
+        env:
+          HAS_PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN != '' && 'true' || 'false' }}
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN || github.token }}
+          OWNER: ${{ needs.setup.outputs.project_owner }}
+          NUMBER: ${{ needs.setup.outputs.project_number }}
+        run: |
+          if [[ "$HAS_PROJECTS_TOKEN" != "true" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::projects: PROJECTS_TOKEN is not set, so the board was not touched. GITHUB_TOKEN cannot read or write Projects v2; see README."
+            echo "- projects: skipped - no PROJECTS_TOKEN secret." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ -z "$OWNER" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::projects: project.owner is not set in .github/pr-hygiene.yml."
+            exit 0
+          fi
+          kind="users"
+          [[ "$(gh api "users/$OWNER" --jq '.type')" == "Organization" ]] && kind="orgs"
+          echo "url=https://github.com/$kind/$OWNER/projects/$NUMBER" >> "$GITHUB_OUTPUT"
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: On the board
+        id: add
+        if: steps.gate.outputs.enabled == 'true' && (github.event.action != 'closed' || github.event.pull_request.merged == true)
+        uses: actions/add-to-project@5afcf98fcd03f1c2f92c3c83f58ae24323cc57fd # v2.0.0
+        with:
+          project-url: ${{ steps.gate.outputs.url }}
+          github-token: ${{ secrets.PROJECTS_TOKEN }}
+
+      - name: Status in step with the pull request
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          PROJECT_OWNER: ${{ needs.setup.outputs.project_owner }}
+          PROJECT_NUMBER: ${{ needs.setup.outputs.project_number }}
+          STATUS_FIELD: ${{ needs.setup.outputs.project_status_field }}
+          STATUS_OPENED: ${{ needs.setup.outputs.project_status_opened }}
+          STATUS_MERGED: ${{ needs.setup.outputs.project_status_merged }}
+          STATUS_CLOSED: ${{ needs.setup.outputs.project_status_closed }}
+          PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+          ITEM_ID: ${{ steps.add.outputs.itemId }}
+          EVENT_ACTION: ${{ github.event.action }}
+          MERGED: ${{ github.event.pull_request.merged }}
+        run: bash .pr-hygiene-toolkit/scripts/project-sync.sh
+
+  # Only ever on a tag push. A release created from a v* tag then shows on
+  # every merged pull request it contains, and its notes follow
+  # .github/release.yml.
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Is there a release for this tag already?
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          echo "name=$TAG" >> "$GITHUB_OUTPUT"
+          if gh release view "$TAG" --repo "$REPO" --json url --jq '.url' 2> /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "- release: $TAG already exists; left as it is." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Release with generated notes
+        if: steps.tag.outputs.exists != 'true'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          generate_release_notes: true

@@ -1,0 +1,19 @@
+[
+  { "name": "type/feat",     "color": "0E8A16", "description": "A new capability" },
+  { "name": "type/fix",      "color": "D73A4A", "description": "A bug fix" },
+  { "name": "type/chore",    "color": "BFD4F2", "description": "Maintenance with no user-facing change" },
+  { "name": "type/docs",     "color": "0075CA", "description": "Documentation only" },
+  { "name": "type/ci",       "color": "5319E7", "description": "CI, workflows and automation" },
+  { "name": "type/refactor", "color": "FBCA04", "description": "Restructuring with no change in behaviour" },
+  { "name": "type/test",     "color": "C2E0C6", "description": "Tests only" },
+  { "name": "type/perf",     "color": "F9D0C4", "description": "Performance" },
+  { "name": "size/XS",       "color": "3CBF00", "description": "Fewer than 10 lines changed" },
+  { "name": "size/S",        "color": "5D9801", "description": "10 to 49 lines changed" },
+  { "name": "size/M",        "color": "7F7203", "description": "50 to 199 lines changed" },
+  { "name": "size/L",        "color": "A14C05", "description": "200 to 499 lines changed" },
+  { "name": "size/XL",       "color": "C32607", "description": "500 or more lines changed" },
+  { "name": "security",      "color": "B60205", "description": "Touches authentication, secrets, permissions or data handling" },
+  { "name": "dependencies",  "color": "0366D6", "description": "Dependency updates; left out of release notes" },
+  { "name": "needs-review",  "color": "FBCA04", "description": "Waiting on a review" },
+  { "name": "blocked",       "color": "000000", "description": "Cannot proceed until something else lands" }
+]

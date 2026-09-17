@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/Obelyth/obelyth-pr-hygiene/main/schema/pr-hygiene.schema.json",
+  "title": "PR Hygiene configuration (.github/pr-hygiene.yml)",
+  "description": "Per-repository settings for the Obelyth/obelyth-pr-hygiene reusable workflow. Read from the default branch, so a pull request cannot change them for itself.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "milestone": {
+      "description": "quarter: the milestone named 'Qn YYYY' for the quarter the pull request was opened in, created with the quarter's last day as its due date when missing. none: milestones are left alone. Any other string: a milestone title to assign verbatim; it must already exist.",
+      "type": "string",
+      "minLength": 1,
+      "default": "quarter",
+      "examples": ["quarter", "none", "Q4 2026"]
+    },
+    "reviewers": {
+      "description": "GitHub logins to request a review from on every pull request. The author is skipped: nobody can review their own pull request.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$" },
+      "default": [],
+      "uniqueItems": true
+    },
+    "copilot_review": {
+      "description": "Also request a Copilot code review (a paid feature on the account).",
+      "type": "boolean",
+      "default": false
+    },
+    "project": {
+      "description": "The Projects v2 board to keep in step with the pull request. Only used when the PROJECTS_TOKEN secret is set.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "description": "The organization or user that owns the board.",
+          "type": "string"
+        },
+        "number": {
+          "description": "The board's number, from its URL. 0 disables the projects job.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "status_field": {
+          "description": "The single-select field to update.",
+          "type": "string",
+          "default": "Status"
+        },
+        "status": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "opened": {
+              "description": "Set when the pull request is added to the board and has no status yet.",
+              "type": "string",
+              "default": "In progress"
+            },
+            "merged": {
+              "description": "Set when the pull request is merged.",
+              "type": "string",
+              "default": "Done"
+            },
+            "closed": {
+              "description": "What happens when it is closed without merging: 'remove' takes it off the board; any other value is a status option to set, falling back to removal when the board has no such option.",
+              "type": "string",
+              "default": "remove"
+            }
+          }
+        }
+      }
+    }
+  }
+}

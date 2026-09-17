@@ -1,0 +1,29 @@
+# This repository runs its own toolkit on its own pull requests, from the
+# commit under review, so a change to a script is exercised before it lands.
+# Every other repository gets the caller that install.sh renders from
+# templates/caller.template.yml instead.
+name: PR Hygiene (self)
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review, closed]
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: pr-hygiene-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  hygiene:
+    uses: ./.github/workflows/pr-hygiene.yml
+    secrets: inherit
+    with:
+      tag: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      toolkit_ref: ${{ github.event.pull_request.head.sha || github.sha }}
