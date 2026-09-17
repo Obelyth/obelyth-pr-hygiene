@@ -24,6 +24,6 @@ project:
   number: 0
   status_field: Status
   status:
-    opened: In progress
+    opened: In Progress
     merged: Done
     closed: remove   # or a status option such as Cancelled

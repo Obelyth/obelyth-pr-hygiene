@@ -19,13 +19,23 @@ The blast radius is kept small on purpose:
   pull request, comment, push, or call the API.
 - **Its output is checked before it is used.** `scripts/body-guard.sh` rejects
   any proposed body that changes a byte outside the template's placeholder
-  comments. The edit is then made by the workflow with `GITHUB_TOKEN`, not by
-  the model.
+  comments, and any placeholder content that opens an HTML comment or leaves a
+  code fence open (both hide what follows), closes an issue with a GitHub
+  keyword, mentions anyone with `@`, or looks like a credential. The body is
+  read again just before the edit and the proposal is dropped if a person
+  changed it meanwhile. The edit is then made by the workflow with
+  `GITHUB_TOKEN`, not by the model, and the model's checkout of the calling
+  repository carries no credential.
 - **Nothing is deleted.** Labels a person added, milestones, bodies and
   releases are only ever added to.
 - **A missing secret skips the job** with a notice; it never fails a check and
   never falls back to a broader credential.
-- **Every action is pinned to a commit SHA**, and Dependabot proposes bumps.
+- **Every third-party action is pinned to a commit SHA**, and Dependabot
+  proposes bumps. The toolkit's own reusable workflow is called at `@main` on
+  purpose, so a fix reaches every repository without a reinstall: `main` moves
+  only by pull request with a green `ci` check under the repository's ruleset,
+  and the scripts are checked out at the same commit as the workflow file via
+  `github.job_workflow_sha`.
 
 ## Credentials
 

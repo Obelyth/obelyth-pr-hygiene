@@ -223,8 +223,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # The calling repository, so the describer can read source for context.
-      # Nothing is ever committed or pushed from here.
+      # Nothing is ever committed or pushed from here, and no credential is
+      # left in .git/config for the model to read: gh gets its token explicitly.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -286,7 +289,10 @@ jobs:
               test-plan  what the diff itself proves (tests added or changed, CI
                          changes) and what has not been verified; never claim a
                          test was run or a result was seen
-            Facts only, no praise, no headings of your own.
+            Facts only, no praise, no headings of your own. Do not mention
+            anyone with @, do not write a closing keyword such as "Closes #n"
+            (linking issues is another job's), do not write HTML comments, and
+            close every code fence you open - the guard rejects all of those.
 
             Every byte outside those comments stays identical: headings, the
             checklist, blank lines, anything a person already wrote. If current.md
@@ -294,10 +300,12 @@ jobs:
             "## Test plan".
 
             Write the complete new body to .pr-hygiene/body.md. That file is the
-            only output. A guard compares it to current.md and discards it if
-            anything outside the placeholder comments changed; if it passes, it
-            becomes the pull request body. Do not edit the pull request yourself,
-            do not comment on it, and do not touch any other file.
+            only output. A guard compares it to the body as it is on the pull
+            request at that moment and discards it if anything outside the
+            placeholder comments changed, or if a person edited the body while
+            you were writing; if it passes, it becomes the pull request body.
+            Do not edit the pull request yourself, do not comment on it, and do
+            not touch any other file.
           claude_args: |
             --model claude-sonnet-5
             --max-turns 12

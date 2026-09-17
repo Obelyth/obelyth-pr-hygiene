@@ -33,6 +33,9 @@ permissions:
 
 jobs:
   hygiene:
+    # @main on purpose: the toolkit's main moves only by pull request with a
+    # green check, and a fix there should reach this repository without a
+    # reinstall. The actions inside the workflow are SHA-pinned.
     uses: __TOOLKIT_REPO__/.github/workflows/pr-hygiene.yml@main
     secrets: inherit
     with:

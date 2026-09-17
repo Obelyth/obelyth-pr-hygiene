@@ -4,12 +4,13 @@
 # is kept), merged -> the merged status, closed without merging -> removed
 # from the board, or set to the closed status when that option exists.
 #
-# Field and option ids are resolved by name on every run, so renaming a column
-# in the board's UI needs nothing here. Needs a token that can write projects:
-# GITHUB_TOKEN cannot, see README.
+# Field and option ids are resolved by name on every run, case-insensitively,
+# so renaming a column in the board's UI needs nothing here. A status the
+# board does not have is a notice, not a failure. Needs a token that can
+# write projects: GITHUB_TOKEN cannot, see README.
 #
 #   GH_TOKEN=<PROJECTS_TOKEN> PROJECT_OWNER=Obelyth PROJECT_NUMBER=3 STATUS_FIELD=Status \
-#   STATUS_OPENED="In progress" STATUS_MERGED=Done STATUS_CLOSED=remove \
+#   STATUS_OPENED="In Progress" STATUS_MERGED=Done STATUS_CLOSED=remove \
 #   PR_NODE_ID=PR_kwDO... ITEM_ID=<from actions/add-to-project, may be empty> \
 #   EVENT_ACTION=opened|closed|... MERGED=true|false project-sync.sh
 #
@@ -64,7 +65,7 @@ elif [[ "${EVENT_ACTION:-}" == "closed" ]]; then
     fi
   fi
 else
-  mode="set-if-empty"; target="${STATUS_OPENED:-In progress}"
+  mode="set-if-empty"; target="${STATUS_OPENED:-In Progress}"
 fi
 
 if [[ -z "$item" ]]; then
@@ -96,7 +97,18 @@ if [[ "$mode" == "set-if-empty" ]]; then
   fi
 fi
 
-ids="$(bash "$here/project-fields.sh" "$field" "$target" <<< "$fields")"
+# A board whose columns are not the settings' - GitHub's own template says
+# "Todo / In Progress / Done", a renamed column, a merged status that never
+# existed - is a notice in the summary, not a red check on every event.
+rc=0
+ids="$(bash "$here/project-fields.sh" "$field" "$target" <<< "$fields" 2> /dev/null)" || rc=$?
+if (( rc == 4 )); then
+  notice "projects: the board's '$field' field has no option named '$target', so the status was left as it is - set project.status in .github/pr-hygiene.yml to one of its options"
+  exit 0
+elif (( rc != 0 )); then
+  echo "project-sync.sh: the board has no field named '$field'; set project.status_field in .github/pr-hygiene.yml" >&2
+  exit 1
+fi
 field_id="$(sed -n 's/^field_id=//p' <<< "$ids")"
 option_id="$(sed -n 's/^option_id=//p' <<< "$ids")"
 gh api graphql -F project="$project_id" -F item="$item" -F field="$field_id" -F option="$option_id" -f query='

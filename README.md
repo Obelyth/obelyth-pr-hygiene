@@ -24,7 +24,7 @@ call it.
 
 | Event on a pull request | labels | milestone | development | describe | projects | reviewers | release |
 |---|---|---|---|---|---|---|---|
-| **opened** | scheme ensured; `type/*` from the title, `size/*` from the diff, path labels if `.github/labeler.yml` exists | `Qn YYYY` for the quarter it was opened in (created if missing, due on the quarter's last day) unless it already has one | `Closes #n` appended when the branch names an open issue and the body closes nothing yet | empty sections written from the diff, unless a draft | added to the board, status → *In progress* if it had none | the configured list, plus Copilot if enabled | - |
+| **opened** | scheme ensured; `type/*` from the title, `size/*` from the diff, path labels if `.github/labeler.yml` exists | `Qn YYYY` for the quarter it was opened in (created if missing, due on the quarter's last day) unless it already has one | `Closes #n` appended when the branch names an open issue and the body closes nothing yet | empty sections written from the diff, unless a draft (needs a Claude credential) | added to the board, status → *In Progress* if it had none (needs `PROJECTS_TOKEN`) | the configured list, plus Copilot if enabled | - |
 | **ready_for_review** | same | same | same | same (this is when a draft gets its description) | same | same | - |
 | **edited** (title or body changed) | `type/*` re-read from the title; a stale one this tool set is swapped, one a person set is kept | same (no-op once set) | same | only if the body is still empty or still has placeholders | status set only if empty | - | - |
 | **synchronize** (new commits) | `size/*` re-bucketed the same way | same | same | same | same | - | - |
@@ -32,6 +32,8 @@ call it.
 | **closed, merged** | - | - | - | - | status → *Done* | - | - |
 | **closed, not merged** | - | - | - | - | removed from the board (or status → *Cancelled* when the board has that column and the settings ask for it) | - | - |
 | **push of a `v*` tag** | - | - | - | - | - | - | a GitHub Release with generated notes, grouped by the `type/*` labels via `.github/release.yml`, if none exists for that tag |
+| **no `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`** | - | - | - | one-line notice in the summary, body left as it is | - | - | - |
+| **no `PROJECTS_TOKEN`** | - | - | - | - | one-line notice in the summary, board untouched | - | - |
 
 A pull request from a fork gets nothing: the token cannot edit it. Every job
 that finds nothing to do says so in the run's summary, and a missing secret is a
@@ -52,7 +54,7 @@ more is possible.
 ## Installing it
 
 ```sh
-./install.sh --repo Obelyth/aaa                 # one repository
+./install.sh --repo Obelyth/example             # one repository
 ./install.sh --owner Obelyth                    # every non-archived repository of an owner
 ./install.sh --repo Obelyth/.github --template-only   # the org-wide pull request template
 ./install.sh --owner ShootJackal --dry-run      # see what would change
@@ -94,6 +96,14 @@ jobs:
       tag: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
 ```
 
+The toolkit is called at `@main` on purpose, unlike the third-party actions
+inside it, which are pinned to commit SHAs: a fix here reaches every
+repository without a reinstall, and `main` only moves by pull request with a
+green `ci` check (the repository's ruleset allows nothing else - no direct
+push, no force-push, no deletion). The scripts run at the same commit as the
+workflow file, via `github.job_workflow_sha`. A fork that wants a fixed
+version can pin the `uses:` line to a SHA; `install.sh` then keeps it there.
+
 ---
 
 ## Settings: `.github/pr-hygiene.yml`
@@ -110,7 +120,7 @@ project:
   number: 0               # the number in the board's URL; 0 switches the job off
   status_field: Status
   status:
-    opened: In progress   # set when added, only if it has no status yet
+    opened: In Progress   # set when added, only if it has no status yet
     merged: Done
     closed: remove        # or a column name such as Cancelled
 ```
@@ -129,13 +139,17 @@ and description only; a label is never deleted). From [`labels/labels.json`](lab
 | - | `security` `dependencies` `needs-review` `blocked` | people (and Dependabot for `dependencies`) |
 
 **A label a person added is never removed.** `type/*` and `size/*` are the
-tool's namespaces, and it replaces a label there only when the pull request's
-events show `github-actions[bot]` put it there. If a person chose a `type/*`
-label, that stands and the computed one is not added over it.
+tool's namespaces, and it replaces a label there only when it is one of the
+scheme's own names and the pull request's events show `github-actions[bot]`
+put it there. If a person chose a `type/*` label, that stands and the computed
+one is not added over it.
 
 Path labels come from [`actions/labeler`](https://github.com/actions/labeler)
 when the repository has a `.github/labeler.yml`, with `sync-labels: false` so it
-only ever adds.
+only ever adds. It runs under the same bot, so any label named in
+`labeler.yml` is treated as its, never as this tool's: a `labeler.yml` that
+maps paths to `type/docs` keeps that label on the pull request, and the title's
+`type/*` is not added over it.
 
 ---
 
@@ -156,7 +170,15 @@ followed by `-`, `_` or the end - and that number is an **open issue** in the
 same repository, and the body has no closing keyword yet, the line `Closes #12`
 is **appended** to the body. The body is never replaced. A body that already
 closes something (any of GitHub's keywords, any case, `#n`, `owner/repo#n` or a
-URL) is left alone, so a link a person wrote is never duplicated or overridden.
+URL) is left alone, so a link a person wrote is never duplicated or overridden;
+a keyword inside a code span, a code block or an HTML comment does not count,
+because GitHub does not link from there either.
+
+Two shapes are not taken as issue numbers unless the `#` is there: a number
+followed by another run of digits (`chore/2026-09-17-cleanup`, `feat/1-2-3`)
+and a four-digit number from 1900 to 2099 (`release/2026-Q3`). A branch named
+after an HTTP status - `fix/404-page` - does name issue #404 when one is open;
+write `fix/http-404-page` if that is not what you mean.
 
 ## Describe
 
@@ -175,9 +197,16 @@ The prompt is not what enforces that. [`scripts/body-guard.sh`](scripts/body-gua
 splits the current body on its placeholder comments and checks that the
 proposed body is exactly those pieces, in order, with anything in between - so a
 reworded sentence, a renamed heading, a ticked checkbox or a paragraph appended
-after the checklist is rejected and the body stays as it was. Only then does
+after the checklist is rejected and the body stays as it was. What goes into a
+placeholder is checked too: an HTML comment or an unclosed code fence (either
+would hide every section after it), a closing keyword such as `Closes #n`, an
+`@mention`, or anything shaped like a credential is rejected, since the model
+reads a diff and a diff can say anything. The body is then read again from the
+pull request, and if a person edited it while the model was writing, the
+proposal is dropped rather than overwrite them (the `edited` event their edit
+raised is queued behind this run and looks afresh). Only then does
 `gh pr edit --body-file` run, from the workflow, not from the model. A body that
-was empty may become anything.
+was empty may become anything that passes the same content checks.
 
 It needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` (an organization
 secret on Obelyth; per-repository on a personal account). Without one, the run

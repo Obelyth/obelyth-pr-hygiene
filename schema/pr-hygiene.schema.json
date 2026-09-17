@@ -52,7 +52,7 @@
             "opened": {
               "description": "Set when the pull request is added to the board and has no status yet.",
               "type": "string",
-              "default": "In progress"
+              "default": "In Progress"
             },
             "merged": {
               "description": "Set when the pull request is merged.",

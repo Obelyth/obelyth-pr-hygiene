@@ -25,8 +25,21 @@ if ! bash "$here/placeholder.sh" < "$out/current.md"; then
   exit 0
 fi
 
-gh pr diff "$PR_NUMBER" --repo "$REPO" --name-only > "$out/files.txt"
-gh pr diff "$PR_NUMBER" --repo "$REPO" > "$out/diff.full"
+# The files API pages, so a pull request of any size lists its files.
+gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' > "$out/files.txt"
+# gh pr diff answers HTTP 406 past 300 files. The files API still carries a
+# patch per file (none for binaries or very large ones), so assemble the diff
+# from those instead of failing the job on exactly the pull requests that
+# need a description most.
+if ! gh pr diff "$PR_NUMBER" --repo "$REPO" > "$out/diff.full" 2> "$out/diff.err"; then
+  {
+    printf '[gh pr diff could not fetch this diff: %s]\n' "$(tr '\n' ' ' < "$out/diff.err")"
+    printf '[assembled per file from the pull request files API instead; a file without a patch is binary or too large]\n\n'
+    gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" \
+      --jq '.[] | "diff --git a/\(.filename) b/\(.filename)\n--- a/\(.filename)\n+++ b/\(.filename)\n\(.patch // "[no patch: binary or too large]")\n"'
+  } > "$out/diff.full"
+fi
+rm -f "$out/diff.err"
 total="$(wc -l < "$out/diff.full")"
 if (( total > max_lines )); then
   head -n "$max_lines" "$out/diff.full" > "$out/diff.patch"
