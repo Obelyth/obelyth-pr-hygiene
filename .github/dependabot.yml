@@ -1,0 +1,9 @@
+# Every third-party action in .github/workflows is pinned to a full commit SHA
+# (a tag can be moved; a SHA cannot). That is only safe to live with if
+# something proposes the bumps - this does, weekly.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
