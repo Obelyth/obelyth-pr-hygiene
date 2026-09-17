@@ -287,8 +287,8 @@ status_in "a field without options is a missing option" 4 '[{"id":"F9","name":"S
 echo "settings file"
 if have_yq; then
   cfg() { bash "$S/config.sh" "$1" | paste -sd' '; }
-  defaults_obelyth="milestone=quarter reviewers= copilot_review=false project_owner=Obelyth project_number=0 project_status_field=Status project_status_opened=In Progress project_status_merged=Done project_status_closed=remove"
-  defaults="milestone=quarter reviewers= copilot_review=false project_owner= project_number=0 project_status_field=Status project_status_opened=In Progress project_status_merged=Done project_status_closed=remove"
+  defaults_obelyth="milestone=quarter reviewers= copilot_review=false project_owner=Obelyth project_number=1 project_status_field=Status project_status_opened=In Progress project_status_merged=Done project_status_closed=remove"
+  defaults="milestone=quarter reviewers= copilot_review=false project_owner= project_number=1 project_status_field=Status project_status_opened=In Progress project_status_merged=Done project_status_closed=remove"
   expect "the shipped template is all defaults" "$defaults_obelyth" cfg "$ROOT/templates/pr-hygiene.yml"
   expect "no file is all defaults"              "$defaults" cfg "$SUITE_TMP/does-not-exist.yml"
   printf '# settings\n# milestone: quarter\n' > "$SUITE_TMP/comments.yml"
