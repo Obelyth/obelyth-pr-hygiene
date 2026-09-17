@@ -94,7 +94,9 @@ jobs:
             rm -f "$cfg"
             echo "no $CONFIG_PATH on the default branch; defaults apply"
           fi
-          bash .pr-hygiene-toolkit/scripts/config.sh "$cfg" | tee -a "$GITHUB_OUTPUT"
+          bash .pr-hygiene-toolkit/scripts/config.sh "$cfg" > "$RUNNER_TEMP/settings"
+          cat "$RUNNER_TEMP/settings"
+          cat "$RUNNER_TEMP/settings" >> "$GITHUB_OUTPUT"
 
   labels:
     needs: setup
@@ -207,6 +209,9 @@ jobs:
         run: bash .pr-hygiene-toolkit/scripts/reviewers.sh
 
   # Runs after development so the two never edit the body at the same time.
+  # Only for events a person caused: a bot's edit (an app appending its
+  # footer, Dependabot) is not a reason to spend a model run, and
+  # claude-code-action refuses bot-initiated runs anyway.
   describe:
     needs: [setup, development]
     if: >-
@@ -214,6 +219,7 @@ jobs:
       && needs.setup.outputs.proceed == 'true'
       && github.event.action != 'closed'
       && github.event.pull_request.draft == false
+      && github.event.sender.type == 'User'
     runs-on: ubuntu-latest
     steps:
       # The calling repository, so the describer can read source for context.

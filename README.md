@@ -161,7 +161,10 @@ URL) is left alone, so a link a person wrote is never duplicated or overridden.
 ## Describe
 
 Runs **only** when the body is empty or still contains a `<!-- pr-hygiene: ... -->`
-placeholder from the template, and never on a draft. It uses
+placeholder from the template (a comment that opens a line; the marker quoted
+inside a sentence, as here, is not one), never on a draft, and only for events
+a person caused - an app editing the body or a Dependabot pull request does
+not spend a model run. It uses
 [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action)
 with `claude-sonnet-5`, a turn cap, and a tool list that can read the pull
 request (`gh pr view`, `gh pr diff`, the checkout) and write **one file**. The

@@ -29,17 +29,27 @@ if [[ "$new" == "$old" ]]; then
   exit 3
 fi
 
-# Split the current body into the literal text between placeholders.
+# Split the current body into the literal text between placeholders. Only a
+# comment that opens a line is a placeholder; one quoted inside a sentence is
+# text a person wrote and stays part of the literal segment.
 ph='<!--[[:space:]]*pr-hygiene:[^>]*-->'
+nl=$'\n'
+line_start="(^|$nl)[[:blank:]]*$"
 segments=()
+acc=""
 rest="$old"
 while [[ "$rest" =~ $ph ]]; do
   m="${BASH_REMATCH[0]}"
   pre="${rest%%"$m"*}"
-  segments+=("$pre")
+  if [[ "$pre" =~ $line_start ]]; then
+    segments+=("$acc$pre")
+    acc=""
+  else
+    acc+="$pre$m"
+  fi
   rest="${rest:$(( ${#pre} + ${#m} ))}"
 done
-segments+=("$rest")
+segments+=("$acc$rest")
 (( ${#segments[@]} > 1 )) || fail "the current body has no placeholder to fill"
 
 # The new body must be those segments, in order, with anything between them.

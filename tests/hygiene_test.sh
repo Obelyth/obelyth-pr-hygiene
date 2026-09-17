@@ -131,6 +131,8 @@ status_in "one placeholder left among written text" 0 $'## Summary\n\nDone.\n\n#
 status_in "marker case does not matter"             0 "<!-- PR-Hygiene: summary -->" bash "$S/placeholder.sh"
 status_in "a written body"                          1 $'## Summary\n\nAdds passkeys.\n\n## Why\n\nAsked for.' bash "$S/placeholder.sh"
 status_in "an ordinary HTML comment is not a marker" 1 "Adds passkeys. <!-- reviewer: see the auth module -->" bash "$S/placeholder.sh"
+status_in "the marker quoted inside a sentence is not one" 1 "Fills the \`<!-- pr-hygiene: ... -->\` comments from the diff." bash "$S/placeholder.sh"
+status_in "the marker indented at the start of a line is one" 0 $'## Why\n\n  <!-- pr-hygiene: why. -->' bash "$S/placeholder.sh"
 status_in "the app-starter template has no markers" 1 $'## What & why\n\n## How to test\n\n- **Steps:** 1.' bash "$S/placeholder.sh"
 
 echo "body guard (exit 0 = apply, 3 = unchanged, 1 = rejected)"
@@ -159,6 +161,10 @@ guard "empty body may become anything"           0 "" "Adds passkeys."
 guard "empty body may not stay empty"            1 "" $'  \n'
 guard "CRLF current body, LF new body"           0 "${tpl//$'\n'/$'\r\n'}" "$filled"
 guard "a body with no placeholder is not touched" 1 "Written by hand." "Rewritten by a model."
+mention="Fills the \`<!-- pr-hygiene: summary. -->\` comments."$'\n\n## Why\n\n<!-- pr-hygiene: why. -->'
+guard "a quoted marker is kept, the real one filled"  0 "$mention" "Fills the \`<!-- pr-hygiene: summary. -->\` comments."$'\n\n## Why\n\nBecause.'
+guard "a quoted marker rewritten is rejected"         1 "$mention" $'Fills the placeholder comments.\n\n## Why\n\nBecause.'
+guard "a body whose only marker is quoted is not touched" 1 "Fills the \`<!-- pr-hygiene: summary. -->\` comments." "Fills them."
 
 echo "label plan"
 plan2() {  # name expected ns want labels events
