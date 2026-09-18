@@ -283,3 +283,29 @@ install.sh                         installs by pull request
 `bash tests/hygiene_test.sh` runs in a second. CI runs shellcheck, actionlint
 (on the workflows and on the rendered caller), validates the data files and the
 settings against the schema, and runs the tests.
+
+
+## Claude PR Review
+
+The reviewer is a second reusable workflow in this toolkit, `.github/workflows/claude-review.yml`,
+called from `templates/claude-review.caller.yml` in each repository. It reads every non-draft,
+human-authored, same-repo pull request once per push and posts one summary comment plus inline
+comments; it never writes to the tree (its tool list allows only comments and CI reads). It runs
+on `claude-sonnet-5` with a 12-turn cap and prints **what each review cost** in the job summary.
+
+Authentication is workload identity federation, one rule per GitHub account, created in the
+Anthropic Console (Settings → Workload identity):
+
+| field | value |
+|---|---|
+| provider | GitHub Actions |
+| subject | `repo:Obelyth@286144193/*` (Obelyth) · `repo:ShootJackal@260789752/*` (ShootJackal) |
+| `event_name` | `pull_request` |
+| `job_workflow_ref` | `Obelyth/obelyth-pr-hygiene/.github/workflows/claude-review.yml@refs/heads/main` |
+| workspace | `wrkspc_01X3oWfERuSwC2LsE5jzG8P1` · service account `svac_018dtjjur2szezYx3BARMvKg` |
+
+Every repository that calls the workflow needs the **immutable OIDC subject** setting on
+(`PUT /repos/{owner}/{repo}/actions/oidc/customization/sub` with `use_immutable_subject: true`),
+which is what puts the numeric ids into the subject the rule matches. Put the rule id into the
+caller's `federation_rule_id` and the review runs. The Console's *Authentication events* tab names
+the failing condition on every rejected exchange — check it first.
