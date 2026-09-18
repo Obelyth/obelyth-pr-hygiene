@@ -1,5 +1,5 @@
-# Claude PR Review — caller. Copied from obelyth-pr-hygiene/templates/claude-review.caller.yml; edit
-# the toolkit, not this file. Reviews every non-draft, human-authored, same-repo pull request once per push and
+# Claude PR Review — caller. Rendered by obelyth-pr-hygiene/install.sh --review; edit the toolkit,
+# not this file. Reviews every non-draft, human-authored, same-repo pull request once per push and
 # prints the cost of each review in the job summary.
 name: Claude PR Review
 
@@ -20,4 +20,5 @@ permissions:
 jobs:
   review:
     uses: Obelyth/obelyth-pr-hygiene/.github/workflows/claude-review.yml@main
-    secrets: inherit   # CLAUDE_CODE_OAUTH_TOKEN: an org secret on Obelyth, a repo secret on ShootJackal repos
+    with:
+      federation_rule_id: "__FEDERATION_RULE_ID__"   # one rule per GitHub account, pinned to the toolkit's workflow

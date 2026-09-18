@@ -2,16 +2,34 @@
 #
 # One review job, called from a 15-line caller in each repository (templates/claude-review.caller.yml),
 # so the prompt, the model, the turn cap and the cost line live in one place. Authentication is
-# the CLAUDE_CODE_OAUTH_TOKEN secret — a Claude subscription token from `claude setup-token`,
-# stored as an organization secret on Obelyth and a repository secret on each ShootJackal repo —
-# which the caller passes with `secrets: inherit`. Chosen 2026-09-18 over workload identity
-# federation so reviews bill the subscription, never the Console's pay-per-token workspace.
+# workload identity federation: the caller passes the federation rule id for its GitHub account,
+# and the rule in the Anthropic Console is pinned to THIS workflow file —
+#   job_workflow_ref = Obelyth/obelyth-pr-hygiene/.github/workflows/claude-review.yml@refs/heads/main
+#   event_name       = pull_request
+#   subject          = repo:<account>@<account_id>/*
+# — the same shape the CI auto-fixer's rule uses, which is why only this workflow can mint a token.
 # Every run prints what it cost in the job summary. See README, "Claude PR Review".
 name: Claude PR Review
 
 on:
   workflow_call:
     inputs:
+      federation_rule_id:
+        description: The Anthropic workload-identity federation rule for this GitHub account (fdrl_…)
+        required: true
+        type: string
+      anthropic_organization_id:
+        required: false
+        type: string
+        default: "90972ce6-7917-48d8-914f-5fc7dde67f9e"
+      anthropic_service_account_id:
+        required: false
+        type: string
+        default: "svac_018dtjjur2szezYx3BARMvKg"
+      anthropic_workspace_id:
+        required: false
+        type: string
+        default: "wrkspc_01X3oWfERuSwC2LsE5jzG8P1"
       model:
         description: Sonnet is the default; Opus is ~2.5x per token and adds little to a read-only review
         required: false
@@ -26,7 +44,7 @@ jobs:
   review:
     # Drafts are not asking for review yet. A PR opened by a bot (dependabot's version bumps)
     # is one the action would refuse red rather than skip: it throws on any Bot actor not named
-    # in allowed_bots. A fork PR cannot read the token secret. Skip all three here,
+    # in allowed_bots. A fork PR carries no OIDC identity this rule admits. Skip all three here,
     # visibly. The AUTHOR is what is tested, not the actor: the auto-fixer's push to a human's PR
     # fires this with actor github-actions[bot], admitted by allowed_bots below.
     if: >-
@@ -38,8 +56,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      # The OIDC token is exchanged for the Claude GitHub App's installation token that posts
-      # the comments; required even though the Anthropic credential is a stored secret.
+      # The OIDC token: exchanged twice, for the Anthropic credential (federation) and for the
+      # Claude GitHub App's installation token that posts the comments.
       id-token: write
       actions: read # github.token backs the github_ci tools, which read the PR's CI runs
     steps:
@@ -52,9 +70,12 @@ jobs:
         id: review
         uses: anthropics/claude-code-action@3b8197d3d486006dd4af54613517f21ac6ac625e # v1.0.227 (where v1 pointed on 2026-09-17)
         with:
-          # The subscription token, inherited from the caller's secrets. When it is empty the
-          # action ends without running Claude and the last step says so in the summary.
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Workload identity federation — identifiers, not secrets. One rule per GitHub
+          # account; this file is rendered per owner from scratch/gen-review-wif.py.
+          anthropic_federation_rule_id: ${{ inputs.federation_rule_id }}
+          anthropic_organization_id: ${{ inputs.anthropic_organization_id }}
+          anthropic_service_account_id: ${{ inputs.anthropic_service_account_id }}
+          anthropic_workspace_id: ${{ inputs.anthropic_workspace_id }}
           # The CI auto-fixer pushes to open PRs as github-actions[bot], and the action refuses
           # bot actors unless named here. Those pushes are the ones a reviewer most needs to see.
           allowed_bots: "github-actions[bot]"
@@ -126,7 +147,7 @@ jobs:
             {
               echo "### Review cost"
               echo
-              echo "**\$${COST}** over ${TURNS} turns in $((MS / 1000))s (subscription, ${{ inputs.model }}, max ${{ inputs.max_turns }} turns)."
+              echo "**\$${COST}** over ${TURNS} turns in $((MS / 1000))s (federation, ${{ inputs.model }}, max ${{ inputs.max_turns }} turns)."
             } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "::notice title=Review cost::execution log not found; cost unknown"

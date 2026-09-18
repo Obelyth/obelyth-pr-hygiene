@@ -293,10 +293,19 @@ human-authored, same-repo pull request once per push and posts one summary comme
 comments; it never writes to the tree (its tool list allows only comments and CI reads). It runs
 on `claude-sonnet-5` with a 12-turn cap and prints **what each review cost** in the job summary.
 
-Authentication is the `CLAUDE_CODE_OAUTH_TOKEN` secret: a Claude subscription token minted
-with `claude setup-token` on a machine signed in to the subscription, stored once as an
-organization secret on Obelyth and as a repository secret on each ShootJackal repository. The
-caller passes it with `secrets: inherit`; nothing else is configured. Reviews therefore bill the
-subscription, not the Console. When the secret is empty or revoked the action ends without
-running Claude and the job summary says **not reviewed** — a green tick there is not a clean
-review, so re-run `claude setup-token` and update the secret when that appears.
+Authentication is workload identity federation, one rule per GitHub account, created in the
+Anthropic Console (Settings → Workload identity):
+
+| field | value |
+|---|---|
+| provider | GitHub Actions |
+| subject | `repo:Obelyth@286144193/*` (Obelyth) · `repo:ShootJackal@260789752/*` (ShootJackal) |
+| `event_name` | `pull_request` |
+| `job_workflow_ref` | `Obelyth/obelyth-pr-hygiene/.github/workflows/claude-review.yml@refs/heads/main` |
+| workspace | `wrkspc_01X3oWfERuSwC2LsE5jzG8P1` · service account `svac_018dtjjur2szezYx3BARMvKg` |
+
+Every repository that calls the workflow needs the **immutable OIDC subject** setting on
+(`PUT /repos/{owner}/{repo}/actions/oidc/customization/sub` with `use_immutable_subject: true`),
+which is what puts the numeric ids into the subject the rule matches. Put the rule id into the
+caller's `federation_rule_id` and the review runs. The Console's *Authentication events* tab names
+the failing condition on every rejected exchange — check it first.
