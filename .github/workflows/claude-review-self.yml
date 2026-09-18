@@ -1,0 +1,30 @@
+# Claude PR Review — this repository's own caller (dogfood), the same file every other
+# repository gets. Reviews every non-draft, human-authored, same-repo pull request once per
+# push and prints the cost of each review in the job summary.
+#
+# Authentication is workload identity federation. The rule id and the service account it is
+# bound to are Actions VARIABLES, not written here: on an Obelyth repository they come from the
+# organization's variables, on a ShootJackal repository from the repository's own. So this file
+# is identical everywhere and names no account.
+name: Claude PR Review (self)
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+  actions: read
+
+jobs:
+  review:
+    uses: Obelyth/obelyth-pr-hygiene/.github/workflows/claude-review.yml@main
+    with:
+      federation_rule_id: ${{ vars.CLAUDE_REVIEW_FEDERATION_RULE_ID }}
+      anthropic_service_account_id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
