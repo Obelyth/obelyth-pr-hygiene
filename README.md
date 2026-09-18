@@ -309,3 +309,13 @@ Every repository that calls the workflow needs the **immutable OIDC subject** se
 which is what puts the numeric ids into the subject the rule matches. Put the rule id into the
 caller's `federation_rule_id` and the review runs. The Console's *Authentication events* tab names
 the failing condition on every rejected exchange — check it first.
+
+The rule id and its service account are **Actions variables**, `CLAUDE_REVIEW_FEDERATION_RULE_ID`
+and `ANTHROPIC_SERVICE_ACCOUNT_ID` — organization variables on Obelyth, repository variables on
+each ShootJackal repository — and the caller passes them through, so the caller file is identical
+everywhere and names no account. **Leave the rule variable unset and the review runs on the
+`CLAUDE_CODE_OAUTH_TOKEN` secret instead** (a subscription token from `claude setup-token`, passed
+with `secrets: inherit`), billing the subscription rather than the Console. One variable per
+account is therefore the switch between the two. When the chosen credential is dead the action
+ends without running Claude and the job summary says **not reviewed** — a green tick there is not
+a clean review.

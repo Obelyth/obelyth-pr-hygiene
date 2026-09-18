@@ -1,6 +1,11 @@
-# Claude PR Review — caller. Rendered by obelyth-pr-hygiene/install.sh --review; edit the toolkit,
-# not this file. Reviews every non-draft, human-authored, same-repo pull request once per push and
-# prints the cost of each review in the job summary.
+# Claude PR Review — caller. Copied from obelyth-pr-hygiene/templates/claude-review.caller.yml; edit
+# the toolkit, not this file. Reviews every non-draft, human-authored, same-repo pull request once
+# per push and prints the cost of each review in the job summary.
+#
+# The federation rule id and its service account are Actions VARIABLES, not written here: on an
+# Obelyth repository they come from the organization's variables, on a ShootJackal repository from
+# the repository's own. Leave them unset and the review runs on the CLAUDE_CODE_OAUTH_TOKEN secret
+# instead. So this file is identical everywhere and names no account.
 name: Claude PR Review
 
 on:
@@ -20,5 +25,7 @@ permissions:
 jobs:
   review:
     uses: Obelyth/obelyth-pr-hygiene/.github/workflows/claude-review.yml@main
+    secrets: inherit
     with:
-      federation_rule_id: "__FEDERATION_RULE_ID__"   # one rule per GitHub account, pinned to the toolkit's workflow
+      federation_rule_id: ${{ vars.CLAUDE_REVIEW_FEDERATION_RULE_ID }}
+      anthropic_service_account_id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}

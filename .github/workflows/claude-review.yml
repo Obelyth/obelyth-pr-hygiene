@@ -2,12 +2,16 @@
 #
 # One review job, called from a 15-line caller in each repository (templates/claude-review.caller.yml),
 # so the prompt, the model, the turn cap and the cost line live in one place. Authentication is
-# workload identity federation: the caller passes the federation rule id for its GitHub account,
-# and the rule in the Anthropic Console is pinned to THIS workflow file —
+# one of two, chosen by the caller. With a federation_rule_id it is workload identity
+# federation: the rule in the Anthropic Console is pinned to THIS workflow file —
 #   job_workflow_ref = Obelyth/obelyth-pr-hygiene/.github/workflows/claude-review.yml@refs/heads/main
 #   event_name       = pull_request
 #   subject          = repo:<account>@<account_id>/*
-# — the same shape the CI auto-fixer's rule uses, which is why only this workflow can mint a token.
+# — and the review bills the Console workspace. Without one it is the CLAUDE_CODE_OAUTH_TOKEN
+# secret the caller passes with `secrets: inherit` (a subscription token from `claude
+# setup-token`), and the review bills the subscription. Callers read the rule id from an Actions
+# variable, so one variable per account decides which path the estate uses. Never both: the
+# action prefers a static credential, so the token is withheld whenever a rule id is given.
 # Every run prints what it cost in the job summary. See README, "Claude PR Review".
 name: Claude PR Review
 
@@ -15,9 +19,12 @@ on:
   workflow_call:
     inputs:
       federation_rule_id:
-        description: The Anthropic workload-identity federation rule for this GitHub account (fdrl_…)
-        required: true
+        description: >-
+          The Anthropic workload-identity federation rule for this GitHub account (fdrl_…).
+          Empty means authenticate with the caller's CLAUDE_CODE_OAUTH_TOKEN secret instead.
+        required: false
         type: string
+        default: ""
       anthropic_organization_id:
         required: false
         type: string
@@ -44,7 +51,7 @@ jobs:
   review:
     # Drafts are not asking for review yet. A PR opened by a bot (dependabot's version bumps)
     # is one the action would refuse red rather than skip: it throws on any Bot actor not named
-    # in allowed_bots. A fork PR carries no OIDC identity this rule admits. Skip all three here,
+    # in allowed_bots. A fork PR carries no OIDC identity and cannot read secrets. Skip all three here,
     # visibly. The AUTHOR is what is tested, not the actor: the auto-fixer's push to a human's PR
     # fires this with actor github-actions[bot], admitted by allowed_bots below.
     if: >-
@@ -70,8 +77,11 @@ jobs:
         id: review
         uses: anthropics/claude-code-action@3b8197d3d486006dd4af54613517f21ac6ac625e # v1.0.227 (where v1 pointed on 2026-09-17)
         with:
+          # One credential, never both: the action prefers a static credential over federation,
+          # so the subscription token is passed only when the caller gave no rule id.
+          claude_code_oauth_token: ${{ inputs.federation_rule_id == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           # Workload identity federation — identifiers, not secrets. One rule per GitHub
-          # account; this file is rendered per owner from scratch/gen-review-wif.py.
+          # account, read by the caller from an Actions variable.
           anthropic_federation_rule_id: ${{ inputs.federation_rule_id }}
           anthropic_organization_id: ${{ inputs.anthropic_organization_id }}
           anthropic_service_account_id: ${{ inputs.anthropic_service_account_id }}
@@ -147,7 +157,7 @@ jobs:
             {
               echo "### Review cost"
               echo
-              echo "**\$${COST}** over ${TURNS} turns in $((MS / 1000))s (federation, ${{ inputs.model }}, max ${{ inputs.max_turns }} turns)."
+              echo "**\$${COST}** over ${TURNS} turns in $((MS / 1000))s (${{ inputs.federation_rule_id != '' && 'federation' || 'subscription' }}, ${{ inputs.model }}, max ${{ inputs.max_turns }} turns)."
             } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "::notice title=Review cost::execution log not found; cost unknown"
