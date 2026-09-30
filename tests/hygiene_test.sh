@@ -327,8 +327,23 @@ cat > "$stub/bin/gh" <<'STUB'
 # failure rather than a silent pass.
 printf '%s\n' "$*" >> "$STUB_LOG"
 tpl_diff=$'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n'
-board='[{"id":"F1","name":"Status","options":[{"id":"O1","name":"Todo"},{"id":"O2","name":"In Progress"},{"id":"O3","name":"Done"}]}]'
+# The board carries the option ids GitHub's own Status template gives every
+# new board: Done's is all digits, which is what an integer-typing flag breaks.
+board='[{"id":"F1","name":"Status","options":[{"id":"f75ad846","name":"Todo"},{"id":"47fc9ee4","name":"In Progress"},{"id":"98236657","name":"Done"}]}]'
 issue12='{"number":12,"state":"open","title":"Passkeys"}'
+# gh api -F sends a value that looks like an integer, true, false or null as
+# that JSON type, and GraphQL refuses it for a String! or ID! variable. The
+# only Int variable the runners bind is the board number, so any other such
+# -F value fails here the way it fails against GitHub.
+if [[ "${1:-} ${2:-}" == "api graphql" ]]; then
+  prev=""
+  for a in "$@"; do
+    if [[ "$prev" == "-F" && "$a" =~ ^([A-Za-z_]+)=(-?[0-9]+|true|false|null)$ && "${BASH_REMATCH[1]}" != number ]]; then
+      echo "gh: Variable \$${BASH_REMATCH[1]} of type String! was provided invalid value" >&2; exit 1
+    fi
+    prev="$a"
+  done
+fi
 case "$*" in
   "pr view 5 --repo o/r --json milestone --jq .milestone.title // empty") printf '%s\n' "${STUB_MILESTONE:-}" ;;
   "api --paginate repos/o/r/milestones?state=all&per_page=100 --jq .[] | {title, state, number}") echo '{"title":"Q1 2026","state":"closed","number":1}' ;;
@@ -360,16 +375,16 @@ case "$*" in
   # fields, the pull request's item on it, the item's current status, then one
   # mutation - set a field or delete the item.
   "api users/Obelyth --jq .type") echo Organization ;;
-  "api graphql -F login=Obelyth -F number=3 -f query="*)
+  "api graphql -f login=Obelyth -F number=3 -f query="*)
     jq -cn --argjson f "${STUB_FIELDS:-$board}" '{data: {organization: {projectV2: {id: "P1", fields: {nodes: ([{}] + $f)}}}}}' ;;
-  "api graphql -F id=PR_1 -f query="*)
+  "api graphql -f id=PR_1 -f query="*)
     if [[ "${STUB_ON_BOARD:-true}" == true ]]; then echo '{"data":{"node":{"projectItems":{"nodes":[{"id":"I1","project":{"id":"P1"}},{"id":"I9","project":{"id":"P9"}}]}}}}'
     else echo '{"data":{"node":{"projectItems":{"nodes":[]}}}}'; fi ;;
-  "api graphql -F id=I1 -F field="*)
+  "api graphql -f id=I1 -f field="*)
     if [[ -n "${STUB_STATUS:-}" ]]; then jq -cn --arg n "$STUB_STATUS" '{data: {node: {fieldValueByName: {name: $n}}}}'
     else echo '{"data":{"node":{"fieldValueByName":null}}}'; fi ;;
-  "api graphql -F project=P1 -F item=I1 -F field="*) echo '{"data":{"updateProjectV2ItemFieldValue":{"projectV2Item":{"id":"I1"}}}}' ;;
-  "api graphql -F project=P1 -F item=I1 -f query="*) echo '{"data":{"deleteProjectV2Item":{"deletedItemId":"I1"}}}' ;;
+  "api graphql -f project=P1 -f item=I1 -f field="*) echo '{"data":{"updateProjectV2ItemFieldValue":{"projectV2Item":{"id":"I1"}}}}' ;;
+  "api graphql -f project=P1 -f item=I1 -f query="*) echo '{"data":{"deleteProjectV2Item":{"deletedItemId":"I1"}}}' ;;
   *) echo "unexpected gh call: $*" >&2; exit 99 ;;
 esac
 exit 0
@@ -487,32 +502,32 @@ check "describe-apply does nothing when the model wrote nothing" \
 psync() {  # env... -> runner project-sync.sh with the board's constants
   PROJECT_OWNER=Obelyth PROJECT_NUMBER=3 PR_NODE_ID=PR_1 ITEM_ID="" STATUS_FIELD=Status runner project-sync.sh
 }
-set_to() { logged "api graphql -F project=P1 -F item=I1 -F field=F1 -F option=$1 -f query="; }
-removed() { logged "api graphql -F project=P1 -F item=I1 -f query="; }
+set_to() { logged "api graphql -f project=P1 -f item=I1 -f field=F1 -f option=$1 -f query="; }
+removed() { logged "api graphql -f project=P1 -f item=I1 -f query="; }
 EVENT_ACTION=opened MERGED=false psync
 check "projects: opened with no status yet -> the default, In Progress" \
-  'exited 0 && set_to O2 && said "set to '"'"'In Progress'"'"'"'
+  'exited 0 && set_to 47fc9ee4 && said "set to '"'"'In Progress'"'"'"'
 STATUS_OPENED="in progress" EVENT_ACTION=opened MERGED=false psync
-check "projects: the settings and the board need not agree on case" 'exited 0 && set_to O2'
+check "projects: the settings and the board need not agree on case" 'exited 0 && set_to 47fc9ee4'
 STUB_STATUS=Todo EVENT_ACTION=opened MERGED=false psync
-check "projects: a status a person set is kept" 'exited 0 && ! logged "-F option=" && said "left where it is"'
+check "projects: a status a person set is kept" 'exited 0 && ! logged "option=" && said "left where it is"'
 STATUS_OPENED=Backlog EVENT_ACTION=opened MERGED=false psync
 check "projects: a status the board does not have is a notice, not a failure" \
-  'exited 0 && ! logged "-F option=" && said "no option named '"'"'Backlog'"'"'"'
+  'exited 0 && ! logged "option=" && said "no option named '"'"'Backlog'"'"'"'
 STATUS_MERGED=Done EVENT_ACTION=closed MERGED=true psync
-check "projects: merged -> Done" 'exited 0 && set_to O3 && ! logged "-F field=Status -f query="'
+check "projects: merged -> Done, whose option id is all digits" 'exited 0 && set_to 98236657 && ! logged "-f field=Status -f query="'
 STATUS_CLOSED=remove EVENT_ACTION=closed MERGED=false psync
-check "projects: closed without merging -> off the board" 'exited 0 && removed && ! logged "-F option=" && said "removed"'
+check "projects: closed without merging -> off the board" 'exited 0 && removed && ! logged "option=" && said "removed"'
 STATUS_CLOSED=Cancelled EVENT_ACTION=closed MERGED=false psync
-check "projects: closed -> Cancelled falls back to removal when the board has no such column" 'exited 0 && removed && ! logged "-F option="'
-STUB_FIELDS='[{"id":"F1","name":"Status","options":[{"id":"O1","name":"Todo"},{"id":"O4","name":"Cancelled"}]}]' STATUS_CLOSED=Cancelled EVENT_ACTION=closed MERGED=false psync
-check "projects: closed -> Cancelled when the board has that column" 'exited 0 && set_to O4 && ! removed'
+check "projects: closed -> Cancelled falls back to removal when the board has no such column" 'exited 0 && removed && ! logged "option="'
+STUB_FIELDS='[{"id":"F1","name":"Status","options":[{"id":"f75ad846","name":"Todo"},{"id":"31415926","name":"Cancelled"}]}]' STATUS_CLOSED=Cancelled EVENT_ACTION=closed MERGED=false psync
+check "projects: closed -> Cancelled when the board has that column" 'exited 0 && set_to 31415926 && ! removed'
 STUB_ON_BOARD=false STATUS_CLOSED=remove EVENT_ACTION=closed MERGED=false psync
 check "projects: closed and not on the board -> nothing to remove" 'exited 0 && ! removed && said "nothing to remove"'
 STUB_ON_BOARD=false EVENT_ACTION=opened MERGED=false psync
-check "projects: opened and not on the board is an error (add-to-project ran first)" 'exited 1 && ! logged "-F option="'
+check "projects: opened and not on the board is an error (add-to-project ran first)" 'exited 1 && ! logged "option="'
 PROJECT_OWNER=Obelyth PROJECT_NUMBER=3 PR_NODE_ID=PR_1 ITEM_ID="" STATUS_FIELD=Stage EVENT_ACTION=opened MERGED=false runner project-sync.sh
-check "projects: a status field the board does not have is an error" 'exited 1 && ! logged "-F option=" && said "no field named"'
+check "projects: a status field the board does not have is an error" 'exited 1 && ! logged "option=" && said "no field named"'
 
 echo
 echo "$PASS passed, $FAIL failed"

@@ -15,7 +15,11 @@
 #   EVENT_ACTION=opened|closed|... MERGED=true|false project-sync.sh
 #
 # The $name tokens inside the single-quoted queries are GraphQL variables,
-# bound with -F, not shell expansions.
+# not shell expansions. Strings and ids are bound with -f, which sends them
+# as they are; only the board number uses -F. -F turns a value that looks
+# like an integer into one, and option ids can be all digits - GitHub's own
+# Status template gives Done the id 98236657 - which GraphQL then refuses
+# for a String! variable.
 # shellcheck disable=SC2016
 set -euo pipefail
 
@@ -27,7 +31,7 @@ notice() { echo "::notice::$1"; echo "- $1" >> "$GITHUB_STEP_SUMMARY"; }
 
 owner_type="$(gh api "users/$PROJECT_OWNER" --jq '.type')"
 root="user"; [[ "$owner_type" == "Organization" ]] && root="organization"
-project="$(gh api graphql -F login="$PROJECT_OWNER" -F number="$PROJECT_NUMBER" -f query="
+project="$(gh api graphql -f login="$PROJECT_OWNER" -F number="$PROJECT_NUMBER" -f query="
   query(\$login: String!, \$number: Int!) {
     $root(login: \$login) {
       projectV2(number: \$number) {
@@ -45,7 +49,7 @@ fields="$(jq ".data.$root.projectV2.fields.nodes | map(select(.id != null))" <<<
 # Which item on the board is this pull request?
 item="${ITEM_ID:-}"
 if [[ -z "$item" ]]; then
-  item="$(gh api graphql -F id="$PR_NODE_ID" -f query='
+  item="$(gh api graphql -f id="$PR_NODE_ID" -f query='
     query($id: ID!) {
       node(id: $id) { ... on PullRequest { projectItems(first: 100) { nodes { id project { id } } } } }
     }' | jq -r --arg p "$project_id" '.data.node.projectItems.nodes[] | select(.project.id == $p) | .id' | head -n1)"
@@ -78,7 +82,7 @@ if [[ -z "$item" ]]; then
 fi
 
 if [[ "$mode" == "remove" ]]; then
-  gh api graphql -F project="$project_id" -F item="$item" -f query='
+  gh api graphql -f project="$project_id" -f item="$item" -f query='
     mutation($project: ID!, $item: ID!) {
       deleteProjectV2Item(input: { projectId: $project, itemId: $item }) { deletedItemId }
     }' > /dev/null
@@ -87,7 +91,7 @@ if [[ "$mode" == "remove" ]]; then
 fi
 
 if [[ "$mode" == "set-if-empty" ]]; then
-  current="$(gh api graphql -F id="$item" -F field="$field" -f query='
+  current="$(gh api graphql -f id="$item" -f field="$field" -f query='
     query($id: ID!, $field: String!) {
       node(id: $id) { ... on ProjectV2Item { fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { name } } } }
     }' | jq -r '.data.node.fieldValueByName.name // empty')"
@@ -111,7 +115,7 @@ elif (( rc != 0 )); then
 fi
 field_id="$(sed -n 's/^field_id=//p' <<< "$ids")"
 option_id="$(sed -n 's/^option_id=//p' <<< "$ids")"
-gh api graphql -F project="$project_id" -F item="$item" -F field="$field_id" -F option="$option_id" -f query='
+gh api graphql -f project="$project_id" -f item="$item" -f field="$field_id" -f option="$option_id" -f query='
   mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
     updateProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) {
       projectV2Item { id }
