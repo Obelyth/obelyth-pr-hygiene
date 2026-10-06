@@ -22,6 +22,24 @@ call it.
 
 ## What happens when
 
+Routine pull request metadata now runs as steps in one `metadata` job. Settings,
+labels, milestone, issue linking, reviewers and project updates share one checkout
+and runner. Reviewer and project failures remain optional; deterministic failures
+still fail the job. The model describer keeps a separate job and its existing body
+guards, allocated only when a live body needs filling and a credential exists.
+Tag releases remain separate. No additional token permissions are requested.
+
+The October 6, 2026 Cortex sample ran six metadata-related hosted jobs lasting
+8, 9, 6, 8, 26 and 15 seconds: six rounded runner minutes. A single metadata job
+with no description work is expected to use 1–2 rounded minutes, saving about
+4–5 per comparable event. This is a projection until the new workflow runs.
+The old `settings`, `labels`, `milestone`, `development`, `reviewers` and `projects`
+check names consolidate into `metadata`; inspected active consumer rulesets
+require core `ci` checks, not those metadata names. External consumers requiring
+an old metadata name must update their required-check policy before adopting.
+CI itself cancels superseded runs; metadata remains serialized by the caller to
+avoid conflicting body edits.
+
 | Event on a pull request | labels | milestone | development | describe | projects | reviewers | release |
 |---|---|---|---|---|---|---|---|
 | **opened** | scheme ensured; `type/*` from the title, `size/*` from the diff, path labels if `.github/labeler.yml` exists | `Qn YYYY` for the quarter it was opened in (created if missing, due on the quarter's last day) unless it already has one | `Closes #n` appended when the branch names an open issue and the body closes nothing yet | empty sections written from the diff, unless a draft (needs a Claude credential) | added to the board, status → *In Progress* if it had none (needs `PROJECTS_TOKEN`) | the configured list, plus Copilot if enabled | - |

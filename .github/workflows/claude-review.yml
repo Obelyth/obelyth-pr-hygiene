@@ -11,6 +11,10 @@ name: Claude PR Review
 
 on:
   workflow_call:
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: Existing subscription credential used only by the review action
+        required: false
     inputs:
       model:
         description: Sonnet is the default; Opus is ~2.5x per token and adds little to a read-only review
